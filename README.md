@@ -18,9 +18,10 @@ I also helped the model fix an issue with the driver that would allow a 3rd part
 This took a combination of a questionably sourced SDK, and some really oddball testing.
 
 The first working version was a 4-byte patch to the kernel (an extra entry in PeerPressure's kernel_patches.bin), and a custom .xex that loaded with Aurora.
-It worked, but I realized that having people patch their kernels just to use a controller is bad practice, so I geared it towards a less-intrusive method instead.
+It worked, but I realized that having people patch their kernels just to use a controller is bad practice, dangerous, and kind of dumb to ask of people (hindsight 20/20) so I re-geared it towards a less-intrusive method instead.
 
 The result? It now loads through PeerPressure's own DLL sideloading .ini files (plus PeerPressure's built-in Aurora hook, since Aurora can't be sideloaded by .ini).
+It also removes the need to re-plug the controllers to reload the driver each time, so you can use your controller from coldboot.
 Nothing in your PeerPressure install gets modified - the loader only flips that one kernel check in memory while the driver loads, then puts it back - so it works with dashboards other than Aurora, installs as a PeerPressure Softmod Extra, and uninstalling is just deleting files.
 It lets you use anything from a DDR dance mat for the Gamecube to a DS5.
 
