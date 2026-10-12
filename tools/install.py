@@ -262,8 +262,9 @@ def sha(data):
 
 
 def find_extra(path):
-    cands = [path] if path else [os.path.join(HERE, "HidDriver360"),
-                                 os.path.join(os.path.dirname(HERE), "dist", "SoftmodExtras", "HidDriver360")]
+    cands = [path] if path else [os.path.join(HERE, "HidDriver360"),                   # beside it
+                                 os.path.join(HERE, "SoftmodExtras", "HidDriver360"),  # release zip
+                                 os.path.join(os.path.dirname(HERE), "dist", "SoftmodExtras", "HidDriver360")]  # repo
     for cand in cands:
         if cand and os.path.isfile(os.path.join(cand, "AuroraFixer.xex")):
             return cand
