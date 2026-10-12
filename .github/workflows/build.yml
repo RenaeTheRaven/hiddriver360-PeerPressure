@@ -26,7 +26,7 @@ jobs:
 
       - name: Build loaders (and check they reproduce loader/SHA256SUMS)
         run: |
-          XEXTOOL=build/xextool/XexTool ./build.sh
+          ./build.sh
           cd loader && sha256sum -c SHA256SUMS
 
       - name: Assemble the Extra

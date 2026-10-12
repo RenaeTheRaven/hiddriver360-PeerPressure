@@ -10,6 +10,9 @@ if [ -z "${XEXTOOL:-}" ]; then
   elif command -v XexTool >/dev/null; then XEXTOOL="$(command -v XexTool)"
   else echo "XexTool not found: run tools/build-xextool.sh or set XEXTOOL" >&2; exit 1; fi
 fi
+case "$XEXTOOL" in
+  */*) XEXTOOL="$(cd "$(dirname "$XEXTOOL")" && pwd)/$(basename "$XEXTOOL")" ;;  # loader/build.sh cd's
+esac
 export XEXTOOL
 
 "$ROOT/loader/build.sh"
