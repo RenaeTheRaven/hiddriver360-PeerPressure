@@ -3,7 +3,11 @@ Rework of the hiddriver360 plugin to work on PressurePoint modded Xbox 360s
 
 
 This is an AI-driven rework of the plugin that let's you use any controller on an Xbox 360.
+
+
 Let me be clear- this may be AI-made, but I'm not an idiot. I'm a Unix system administrator of 12 years.
+
+
 I may not be a strictly software development oriented tech, but I know a thing or two, so there was plenty of hand-holding.
 
 
