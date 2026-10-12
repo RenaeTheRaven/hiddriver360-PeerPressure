@@ -1,7 +1,10 @@
 #!/bin/bash
 # Builds the loaders and assembles the PeerPressure Softmod Extra.
+#   ./build.sh --release        shareable Extra, no PeerPressure files      -> dist/release/
 #   ./build.sh --peerpressure <SoftmodInstaller.zip | BadUpdatePayload folder | SoftmodData.zip>
 #              [--install-into <BadUpdatePayload folder on your USB stick>]
+#                               personal Extra with Aurora wired up from YOUR PeerPressure copy
+#                               -> dist/personal/ (don't redistribute)
 # XexTool: $XEXTOOL, else build/xextool/XexTool (tools/build-xextool.sh), else XexTool on PATH.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -23,5 +26,5 @@ export XEXTOOL
 if [ $# -gt 0 ]; then
   python3 "$ROOT/tools/make-extra.py" "$@"
 else
-  echo "loaders built; pass --peerpressure <PeerPressure download> to assemble the Extra"
+  echo "loaders built; pass --release (or --peerpressure <your PeerPressure download>) to assemble the Extra"
 fi

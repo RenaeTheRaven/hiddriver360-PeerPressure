@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Assemble the hiddriver360 PeerPressure "Softmod Extra".
 
-    python tools/make-extra.py --peerpressure <PeerPressure download> [--install-into <BadUpdatePayload>]
+Shareable Extra (contains no PeerPressure files - this is what releases/CI ship):
 
-<PeerPressure download> is any of: SoftmodInstaller.zip, an extracted BadUpdatePayload folder, or
-its SoftmodData.zip. PeerPressure's own AuroraFixer.xex is taken from it (and stored as
-AuroraFixer.orig.xex, which our loader runs first), so the Extra always matches the PeerPressure
-version you install it with.
+    python tools/make-extra.py --release
 
-Output: dist/SoftmodExtras/HidDriver360/ plus dist/SoftmodExtras/SoftmodExtras-entry.ini.
-With --install-into, the folder is copied into <BadUpdatePayload>/SoftmodExtras/ and the entry is
-added to its SoftmodExtras.ini (once), ready for the installer's "Extras Only" option.
+Personal Extra for your own USB stick, with Aurora support wired up from YOUR PeerPressure
+download (its AuroraFixer.xex is kept as AuroraFixer.orig.xex, which our loader runs first):
+
+    python tools/make-extra.py --peerpressure <SoftmodInstaller.zip | BadUpdatePayload | SoftmodData.zip>
+                               [--install-into <BadUpdatePayload folder on your USB stick>]
+
+The personal Extra contains a copy of PeerPressure's AuroraFixer.xex - it's for your console only;
+don't redistribute it. PeerPressure is grimdoomer's work, not part of this project.
+
+Outputs: dist/release/SoftmodExtras/ or dist/personal/SoftmodExtras/ (HidDriver360/ + the
+SoftmodExtras.ini entry). --install-into copies the folder into <BadUpdatePayload>/SoftmodExtras/
+and adds the entry to its SoftmodExtras.ini (once), ready for the installer's "Extras Only".
 
 Needs the built loaders (loader/build.sh) and hiddriver/prebuilt/hiddriver.xex.
 """
@@ -24,12 +30,55 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIST = os.path.join(ROOT, "dist", "SoftmodExtras")
 EXTRA_NAME = "HidDriver360"
 FIXER_IN_ZIP = "PeerPressure/SideLoading/AuroraFixer.xex"
 
-PEERPRESSURE_NOTICE = """AuroraFixer.orig.xex is PeerPressure's own AuroraFixer.xex, unmodified, copied from the
-PeerPressure release this Extra was built with. PeerPressure: https://github.com/grimdoomer/Xbox360PeerPressure
+CREDITS = """hiddriver360 for PeerPressure - credits
+=========================================
+
+hiddriver360 - by EinTim23 - https://github.com/EinTim23/hiddriver360
+  The controller driver itself: USB HID support, DualShock/DualSense/Switch Pro handling,
+  controller mapping, and the XInput integration. GPL-3.0. This project only adds a memory fix
+  for running outside DashLaunch, and a loader for PeerPressure.
+
+PeerPressure - by grimdoomer - https://github.com/grimdoomer/Xbox360PeerPressure
+  The softmod that makes this possible: its DLL sideloader, the Aurora hook, the removed memory
+  protections the loader relies on, and the Softmod Extras installer this package plugs into.
+  None of PeerPressure's files are included in this project.
+
+XexTool - by Team Resurgent - https://github.com/Team-Resurgent/XexTool
+  Used to build the loaders.
+
+PeerPressure port, loader and packaging - Renae the Raven
+  https://github.com/RenaeTheRaven/hiddriver360-PeerPressure
+"""
+
+AURORA_HOWTO = """Aurora support
+==============
+
+PeerPressure never sideloads .ini DLLs into Aurora (Aurora has no title ID); the only thing it
+loads into Aurora is Hdd1:\\PeerPressure\\SideLoading\\AuroraFixer.xex - PeerPressure's own file.
+So for Aurora, our chain loader (HidDriver\\AuroraFixer.xex in this folder) has to take that name
+and run PeerPressure's original first. This package doesn't ship PeerPressure's file, so set it up
+from the copy already on your console:
+
+Automatic (from a PC):
+  python install.py install <console-ip>          (over FTP; keeps your console's own fixer)
+  python make-extra.py --peerpressure <your PeerPressure download> --install-into <USB>\\BadUpdatePayload
+
+By hand, in Aurora's file manager, in Hdd1:\\PeerPressure\\SideLoading\\:
+  1. Rename AuroraFixer.xex to AuroraFixer.orig.xex   (keep it - it's PeerPressure's, and runs first)
+  2. Copy HidDriver\\AuroraFixer.xex into SideLoading\\
+  Never do step 2 without step 1.
+  Undo: delete AuroraFixer.xex and rename AuroraFixer.orig.xex back to AuroraFixer.xex.
+
+The MS dashboard, FreeStyle Dash and XeXMenu need none of this (they use the .ini files).
+"""
+
+PEERPRESSURE_NOTICE = """AuroraFixer.orig.xex in this folder is PeerPressure's own AuroraFixer.xex, unmodified, copied
+from YOUR PeerPressure download by tools/make-extra.py for use on your own console. It is not part
+of hiddriver360-PeerPressure - don't redistribute this Extra. PeerPressure is by grimdoomer:
+https://github.com/grimdoomer/Xbox360PeerPressure
 
 Peer Pressure is licensed under Grimdoomer's "You owe me a beer" License v1.0
 
@@ -49,6 +98,11 @@ class Error(Exception):
 def read(path):
     with open(path, "rb") as f:
         return f.read()
+
+
+def write_text(path, text):
+    with open(path, "w", newline="\r\n") as f:
+        f.write(text)
 
 
 def sha(data):
@@ -105,40 +159,51 @@ def check_hashes(sums_file, folder):
 
 
 def build(fixer):
-    if (xex_pe_name(fixer) or "").lower() != "aurorafixer.exe":
+    """fixer = PeerPressure's AuroraFixer.xex (personal Extra) or None (shareable release Extra)."""
+    if fixer is not None and (xex_pe_name(fixer) or "").lower() != "aurorafixer.exe":
         raise Error("the AuroraFixer.xex found doesn't look like PeerPressure's (PE name %r)"
                     % xex_pe_name(fixer))
     check_hashes(os.path.join(ROOT, "loader", "SHA256SUMS"), os.path.join(ROOT, "loader"))
     check_hashes(os.path.join(ROOT, "hiddriver", "prebuilt", "SHA256SUMS"),
                  os.path.join(ROOT, "hiddriver", "prebuilt"))
 
-    out = os.path.join(DIST, EXTRA_NAME)
+    dist = os.path.join(ROOT, "dist", "release" if fixer is None else "personal", "SoftmodExtras")
+    out = os.path.join(dist, EXTRA_NAME)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(out, "HidDriver"))
     # Everything in this folder is copied into Hdd1:\PeerPressure\SideLoading by the installer.
-    shutil.copy(os.path.join(ROOT, "loader", "AuroraFixer.xex"), os.path.join(out, "AuroraFixer.xex"))
-    with open(os.path.join(out, "AuroraFixer.orig.xex"), "wb") as f:
-        f.write(fixer)
+    hid = os.path.join(out, "HidDriver")
+    chain = os.path.join(ROOT, "loader", "AuroraFixer.xex")
+    if fixer is None:
+        shutil.copy(chain, os.path.join(hid, "AuroraFixer.xex"))  # inactive; see README-AURORA.txt
+        write_text(os.path.join(hid, "README-AURORA.txt"), AURORA_HOWTO)
+    else:
+        shutil.copy(chain, os.path.join(out, "AuroraFixer.xex"))
+        with open(os.path.join(out, "AuroraFixer.orig.xex"), "wb") as f:
+            f.write(fixer)
+        write_text(os.path.join(hid, "PEERPRESSURE-NOTICE.txt"), PEERPRESSURE_NOTICE)
     dash = os.path.join(ROOT, "extra", "dashboards")
     for ini in sorted(os.listdir(dash)):
         shutil.copy(os.path.join(dash, ini), os.path.join(out, ini))
-    shutil.copy(os.path.join(ROOT, "loader", "HidLoader.xex"), os.path.join(out, "HidDriver", "HidLoader.xex"))
-    shutil.copy(os.path.join(ROOT, "hiddriver", "prebuilt", "hiddriver.xex"),
-                os.path.join(out, "HidDriver", "hiddriver.xex"))
-    with open(os.path.join(out, "HidDriver", "PEERPRESSURE-NOTICE.txt"), "w", newline="\r\n") as f:
-        f.write(PEERPRESSURE_NOTICE)
+    shutil.copy(os.path.join(ROOT, "loader", "HidLoader.xex"), os.path.join(hid, "HidLoader.xex"))
+    shutil.copy(os.path.join(ROOT, "hiddriver", "prebuilt", "hiddriver.xex"), os.path.join(hid, "hiddriver.xex"))
+    write_text(os.path.join(hid, "CREDITS.txt"), CREDITS)
     shutil.copy(os.path.join(ROOT, "extra", "SoftmodExtras-entry.ini"),
-                os.path.join(DIST, "SoftmodExtras-entry.ini"))
-    print("built %s" % os.path.relpath(out, ROOT))
+                os.path.join(dist, "SoftmodExtras-entry.ini"))
+
+    print("built %s (%s)" % (os.path.relpath(out, ROOT),
+          "shareable - no PeerPressure files" if fixer is None else "PERSONAL - includes your PeerPressure's AuroraFixer"))
     for r, _, fs in os.walk(out):
         for n in sorted(fs):
             p = os.path.join(r, n)
             print("  %-40s %s" % (os.path.relpath(p, out), sha(read(p))[:12]))
-    print("  (AuroraFixer.orig.xex = PeerPressure's AuroraFixer, sha %s)" % sha(fixer)[:12])
+    if fixer is not None:
+        print("NOTE: this Extra contains PeerPressure's AuroraFixer.xex from your download - use it on "
+              "your own console, don't redistribute it.")
     return out
 
 
-def install_into(payload, out):
+def install_into(payload, out, personal):
     extras = os.path.join(payload, "SoftmodExtras")
     ini = os.path.join(extras, "SoftmodExtras.ini")
     if not os.path.isfile(ini):
@@ -155,21 +220,27 @@ def install_into(payload, out):
         with open(ini, "ab") as f:
             f.write(("\r\n" + entry.strip() + "\r\n").encode())
         print("added [%s] to %s" % (EXTRA_NAME, ini))
-    print("copied to %s - run the PeerPressure installer and choose Install Extras / Extras Only"
-          % dest)
+    print("copied to %s - run the PeerPressure installer and choose Install Extras / Extras Only" % dest)
+    if not personal:
+        print("note: without --peerpressure this Extra doesn't enable Aurora (see HidDriver/README-AURORA.txt)")
 
 
 def main():
     ap = argparse.ArgumentParser(description="Build the hiddriver360 PeerPressure Softmod Extra.")
-    ap.add_argument("--peerpressure", required=True,
-                    help="SoftmodInstaller.zip, BadUpdatePayload folder, or SoftmodData.zip")
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--release", action="store_true",
+                      help="shareable Extra with no PeerPressure files (Aurora set up separately)")
+    mode.add_argument("--peerpressure", metavar="DOWNLOAD",
+                      help="your SoftmodInstaller.zip / BadUpdatePayload / SoftmodData.zip: personal "
+                           "Extra with Aurora support (don't redistribute)")
     ap.add_argument("--install-into", metavar="BadUpdatePayload",
                     help="also copy the Extra into this BadUpdatePayload folder (e.g. on your USB stick)")
     args = ap.parse_args()
     try:
-        out = build(find_peerpressure_fixer(args.peerpressure))
+        fixer = None if args.release else find_peerpressure_fixer(args.peerpressure)
+        out = build(fixer)
         if args.install_into:
-            install_into(args.install_into, out)
+            install_into(args.install_into, out, personal=fixer is not None)
         return 0
     except (Error, OSError, zipfile.BadZipFile) as e:
         print("ERROR: %s" % e, file=sys.stderr)

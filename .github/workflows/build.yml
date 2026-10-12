@@ -4,10 +4,6 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-    inputs:
-      peerpressure_url:
-        description: "PeerPressure SoftmodInstaller.zip URL to build the Extra against (optional)"
-        required: false
 
 jobs:
   build:
@@ -29,18 +25,18 @@ jobs:
           ./build.sh
           cd loader && sha256sum -c SHA256SUMS
 
-      - name: Assemble the Extra
-        if: ${{ inputs.peerpressure_url != '' }}
+      # The shareable Extra contains no PeerPressure files (PeerPressure is grimdoomer's, not part
+      # of this project); Aurora is wired up on the user's console from their own copy.
+      - name: Assemble the shareable Extra
         run: |
-          curl -fsSL -o SoftmodInstaller.zip "${{ inputs.peerpressure_url }}"
-          python3 tools/make-extra.py --peerpressure SoftmodInstaller.zip
-          cp tools/install.py dist/SoftmodExtras/
-          cp README.md LICENSE dist/SoftmodExtras/
+          python3 tools/make-extra.py --release
+          if find dist/release -name 'AuroraFixer.orig.xex' | grep -q .; then
+            echo "PeerPressure file in the release Extra" >&2; exit 1
+          fi
+          cp tools/install.py README.md LICENSE dist/release/
 
       - uses: actions/upload-artifact@v4
         with:
           name: hiddriver360-peerpressure
-          path: |
-            loader/*.xex
-            dist/SoftmodExtras/
-          if-no-files-found: warn
+          path: dist/release/
+          if-no-files-found: error

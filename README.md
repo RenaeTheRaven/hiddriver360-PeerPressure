@@ -29,6 +29,28 @@ This was really fun to get working.
 
 ---
 
+## Credits
+
+This project stands on two others:
+
+- **[hiddriver360](https://github.com/EinTim23/hiddriver360) by EinTim23** — the controller driver
+  itself: USB HID support, DualShock / DualSense / Switch Pro handling, controller mapping and the
+  XInput integration. Everything a controller actually does here is their work. This project only
+  adds a memory fix for running outside DashLaunch, and a loader for PeerPressure. GPL-3.0.
+- **[PeerPressure](https://github.com/grimdoomer/Xbox360PeerPressure) by grimdoomer** — the
+  softmod that makes any of this possible on 17559: its DLL sideloader, the Aurora hook, the
+  removed memory protections the loader relies on, and the Softmod Extras installer this package
+  plugs into.
+
+**None of PeerPressure's code or files are part of this project.** The one PeerPressure file the
+Aurora setup needs (`AuroraFixer.xex`) is always taken from your own console or your own
+PeerPressure download, never shipped here.
+
+Also thanks to Team Resurgent for [XexTool](https://github.com/Team-Resurgent/XexTool), used to
+build the loaders.
+
+---
+
 Use **DualShock 3/4, DualSense, Switch Pro and other USB HID controllers** on an Xbox 360 running
 the [PeerPressure](https://github.com/grimdoomer/Xbox360PeerPressure) softmod — in the dashboard
 **and in games**, including unplugging/replugging a controller mid-game.
@@ -51,24 +73,37 @@ limitation).
 
 ### As a Softmod Extra (on the console)
 
-1. Get the `HidDriver360` Extra: from the [Releases](../../releases) page, or build it (below).
-2. On the USB stick you use for PeerPressure, copy the `HidDriver360` folder into
-   `BadUpdatePayload\SoftmodExtras\` and add the section from `SoftmodExtras-entry.ini` to
-   `BadUpdatePayload\SoftmodExtras\SoftmodExtras.ini`
-   (`tools/make-extra.py --install-into <USB>\BadUpdatePayload` does both).
-3. Run the PeerPressure installer (Rock Band Blitz demo), choose **Install Softmod** → tick
-   **Install Extras** → select **hiddriver360** → **Extras Only** (or include it in a Full Install).
-4. Reboot with a controller plugged in.
+**Easiest — with Aurora support, from a PC:** point the tool at your PeerPressure download and
+your USB stick; it builds the Extra (taking PeerPressure's `AuroraFixer.xex` from *your* download)
+and registers it in the stick's `SoftmodExtras.ini`:
+
+```
+./build.sh --peerpressure <SoftmodInstaller.zip or BadUpdatePayload> --install-into <USB>\BadUpdatePayload
+```
+
+That Extra contains your copy of PeerPressure's `AuroraFixer.xex`: it's for your console, don't share it.
+
+**Or with the shareable Extra** (from the [Releases](../../releases) page or `make-extra.py --release`):
+copy its `HidDriver360` folder into `BadUpdatePayload\SoftmodExtras\` and add the section from
+`SoftmodExtras-entry.ini` to `BadUpdatePayload\SoftmodExtras\SoftmodExtras.ini`. It contains no
+PeerPressure files, so **Aurora needs one extra step afterwards** — run `install.py` (below) or follow
+`HidDriver\README-AURORA.txt` (two file operations in Aurora's file manager). The MS dashboard,
+FreeStyle Dash and XeXMenu work straight away.
+
+Then run the PeerPressure installer (Rock Band Blitz demo), choose **Install Softmod** → tick
+**Install Extras** → select **hiddriver360** → **Extras Only** (or include it in a Full Install), and
+reboot with a controller plugged in.
 
 The Extra copies its files into `Hdd1:\PeerPressure\SideLoading\`:
 
 | File | Purpose |
 |---|---|
-| `AuroraFixer.xex` | loader for **Aurora**: runs PeerPressure's real fixer, then hiddriver |
-| `AuroraFixer.orig.xex` | PeerPressure's own `AuroraFixer.xex`, unmodified |
 | `fffe07d1.ini`, `f5d20000.ini`, `c0de9999.ini` | sideload `HidLoader.xex` into the MS dashboard, FreeStyle Dash, XeXMenu |
 | `HidDriver\HidLoader.xex` | loader for dashboards with a title ID |
 | `HidDriver\hiddriver.xex` | hiddriver360 with the fix |
+| `HidDriver\CREDITS.txt` | credits for hiddriver360 and PeerPressure |
+| `AuroraFixer.xex` *(Aurora setup)* | our loader for **Aurora**: runs PeerPressure's real fixer, then hiddriver |
+| `AuroraFixer.orig.xex` *(Aurora setup)* | PeerPressure's own `AuroraFixer.xex`, from your console / your download |
 
 ### Over FTP (no USB stick / installer run needed)
 
@@ -80,7 +115,8 @@ python tools/install.py status <console-ip>
 python tools/install.py uninstall <console-ip>
 ```
 
-It installs the same files, keeps the console's **own** `AuroraFixer.xex` as `.orig`, backs up
+It installs the same files including the Aurora setup (using the console's **own**
+`AuroraFixer.xex` as `.orig`, so it works with the shareable Extra too), backs up
 everything it changes, verifies every upload (Aurora's FTP stalls now and then; it retries and
 never leaves a half-written file), and also cleans up the older `kernel_patches.bin`-based install.
 
@@ -143,21 +179,27 @@ capabilities hook. Details: [`hiddriver/0001-*.patch`](hiddriver/).
 |---|---|---|
 | `loader/` → `AuroraFixer.xex`, `HidLoader.xex` | clang, ld.lld, [XexTool](https://github.com/Team-Resurgent/XexTool) | yes — byte-identical, hashes in `loader/SHA256SUMS` |
 | `hiddriver.xex` | an Xbox 360 XDK (not redistributable) | source patch here; prebuilt binary in `hiddriver/prebuilt/` |
-| the Extra | Python 3.8+ | yes, given a PeerPressure download (for its `AuroraFixer.xex`) |
+| the Extra | Python 3.8+ | yes — `--release` needs nothing else; `--peerpressure` uses your own PeerPressure download |
 
 ```
 tools/build-xextool.sh                  # once: builds XexTool into build/xextool (or set XEXTOOL)
-./build.sh --peerpressure <SoftmodInstaller.zip | BadUpdatePayload folder>
+./build.sh --release                    # shareable Extra -> dist/release/
+./build.sh --peerpressure <SoftmodInstaller.zip | BadUpdatePayload folder>   # personal -> dist/personal/
 python -m unittest discover -s tests    # installer tests
 ```
 
-`build.sh` builds the loaders, checks them against `loader/SHA256SUMS`, and assembles
-`dist/SoftmodExtras/HidDriver360` (+ `SoftmodExtras-entry.ini`). See
+`build.sh` builds the loaders, checks them against `loader/SHA256SUMS`, and assembles the Extra
+(`HidDriver360/` + `SoftmodExtras-entry.ini`). Only `dist/release/` is meant to be shared: the
+personal build contains your copy of PeerPressure's `AuroraFixer.xex`. See
 [`hiddriver/BUILDING.md`](hiddriver/BUILDING.md) for rebuilding `hiddriver.xex`.
 
-## Credits and licenses
+## Licenses
 
-- hiddriver360 by EinTim23 — GPL-3.0. This repository is GPL-3.0 too ([`LICENSE`](LICENSE)).
-- PeerPressure by grimdoomer — "You owe me a beer" License v1.0; the Extra bundles PeerPressure's
-  `AuroraFixer.xex` unmodified, with its notice (`HidDriver\PEERPRESSURE-NOTICE.txt`).
-- XexTool by Team Resurgent (build tool only, not distributed).
+- This repository is GPL-3.0 ([`LICENSE`](LICENSE)), like hiddriver360 by EinTim23, which it
+  patches and redistributes (`hiddriver/prebuilt/hiddriver.xex`; source in `hiddriver/`).
+- PeerPressure by grimdoomer is not included in any form. A *personal* Extra built with
+  `--peerpressure` contains your own copy of its `AuroraFixer.xex`, with PeerPressure's license
+  notice (`HidDriver\PEERPRESSURE-NOTICE.txt`); don't redistribute that build.
+- XexTool by Team Resurgent is a build tool only and isn't distributed.
+
+See [Credits](#credits) at the top.

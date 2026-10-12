@@ -91,16 +91,24 @@ class NoBackup:
     def save(self, *a): pass
 
 
-def make_payload(tmp):
-    root = os.path.join(tmp, "HidDriver360")
+CHAIN = fake_xex("HidLoader", b"chain-v-current")
+
+
+def make_payload(tmp, release=False):
+    """release=True: the shareable Extra (no PeerPressure files, chain loader parked in HidDriver\\).
+    release=False: a personal Extra (chain loader on top + the user's own AuroraFixer.orig.xex)."""
+    root = os.path.join(tmp, "release" if release else "personal", "HidDriver360")
     os.makedirs(os.path.join(root, "HidDriver"))
-    files = {"AuroraFixer.xex": fake_xex("HidLoader", b"chain-v-current"),
-             "AuroraFixer.orig.xex": PP_FIXER,
-             "fffe07d1.ini": b"; hiddriver360: MS dashboard\r\n[DllConfig]\r\n",
+    files = {"fffe07d1.ini": b"; hiddriver360: MS dashboard\r\n[DllConfig]\r\n",
              "f5d20000.ini": b"; hiddriver360: FSD\r\n[DllConfig]\r\n",
              "HidDriver/HidLoader.xex": b"sideload-dll",
              "HidDriver/hiddriver.xex": b"hiddriver",
-             "HidDriver/PEERPRESSURE-NOTICE.txt": b"notice"}
+             "HidDriver/CREDITS.txt": b"credits"}
+    if release:
+        files.update({"HidDriver/AuroraFixer.xex": CHAIN, "HidDriver/README-AURORA.txt": b"howto"})
+    else:
+        files.update({"AuroraFixer.xex": CHAIN, "AuroraFixer.orig.xex": PP_FIXER,
+                      "HidDriver/PEERPRESSURE-NOTICE.txt": b"notice"})
     for name, data in files.items():
         with open(os.path.join(root, *name.split("/")), "wb") as f:
             f.write(data)
@@ -207,6 +215,49 @@ class InstallTests(Base):
         FILES[I.FIXER] = PP_FIXER
         with self.assertRaises(I.InstallError):
             self.run_cmd(I.install)
+
+
+class ReleaseExtraTests(Base):
+    """The shareable Extra ships no PeerPressure file; the console's own fixer must be used."""
+    def setUp(self):
+        super().setUp()
+        self.payload = make_payload(self._tmp.name, release=True)
+
+    def test_payload_has_no_peerpressure_file(self):
+        self.assertIsNone(self.payload.bundled_orig)
+        self.assertEqual(self.payload.loader, CHAIN)
+        self.assertNotIn("AuroraFixer.xex", self.payload.hid)  # parked copy isn't uploaded
+
+    def test_install_uses_consoles_own_fixer(self):
+        FILES.update(stock_console())
+        self.run_cmd(I.install)
+        self.assert_installed(orig=PP_FIXER)  # PP_FIXER came from the console, not the payload
+        self.assertNotIn(I.HID_DIR + "/AuroraFixer.xex", FILES)
+
+    def test_no_fixer_on_console_skips_only_aurora(self):
+        FILES.update(stock_console())
+        del FILES[I.FIXER]
+        self.run_cmd(I.install)
+        self.assertNotIn(I.FIXER, FILES)
+        self.assertNotIn(I.FIXER_ORIG, FILES)
+        self.assertEqual(FILES[I.HID_DIR + "/hiddriver.xex"], b"hiddriver")
+        self.assertIn(I.SL + "/fffe07d1.ini", FILES)
+
+    def test_chain_without_orig_refused_before_any_write(self):
+        FILES.update(stock_console())
+        FILES[I.FIXER] = CHAIN  # our loader active but PeerPressure's original lost
+        before = dict(FILES)
+        with self.assertRaises(I.InstallError):
+            self.run_cmd(I.install)
+        self.assertEqual(FILES, before)
+
+    def test_uninstall_restores_stock_exactly(self):
+        FILES.update(stock_console())
+        before = dict(FILES)
+        self.run_cmd(I.install)
+        FILES[I.HID_DIR + "/AuroraFixer.xex"] = CHAIN  # as if the Extra was copied by hand
+        self.run_cmd(I.uninstall)
+        self.assertEqual(FILES, before)
 
 
 class FaultTests(Base):

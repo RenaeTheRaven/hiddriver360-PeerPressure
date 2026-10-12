@@ -7,12 +7,13 @@
 
 Options: --user / --password (FTP login, default xboxftp / xboxftp - Aurora's), --port,
 --extra <folder> (the assembled HidDriver360 Extra; default: next to this script, or
-dist/SoftmodExtras/HidDriver360 in the repo). Python 3.8+, standard library only.
+dist/release|personal/SoftmodExtras/HidDriver360 in the repo). Python 3.8+, standard library only.
 
-Installs exactly what the PeerPressure "Softmod Extra" installs, into
-Hdd1:\\PeerPressure\\SideLoading\\, with one difference: the console's OWN AuroraFixer.xex is kept as
-AuroraFixer.orig.xex (so it always matches the installed PeerPressure version). Also cleans up the
-older kernel_patches.bin-based install if it finds one. No other PeerPressure file is touched.
+Installs what the PeerPressure "Softmod Extra" installs, into Hdd1:\\PeerPressure\\SideLoading\\,
+plus the Aurora setup: the console's OWN AuroraFixer.xex is kept as AuroraFixer.orig.xex (so it
+always matches the installed PeerPressure version - no PeerPressure file ever comes from this
+project). Also cleans up the older kernel_patches.bin-based install if it finds one. No other
+PeerPressure file is touched.
 
 Every changed file is backed up next to this script (backups/<ip>-<time>/), every upload is
 verified, and a failed write puts the previous file back. Safe to re-run.
@@ -37,7 +38,10 @@ SL = PP + "/SideLoading"
 FIXER = SL + "/AuroraFixer.xex"
 FIXER_ORIG = SL + "/AuroraFixer.orig.xex"
 HID_DIR = SL + "/HidDriver"
-HID_FILES = ["HidLoader.xex", "hiddriver.xex", "PEERPRESSURE-NOTICE.txt"]
+HID_REQUIRED = ["HidLoader.xex", "hiddriver.xex"]
+HID_DOCS = ["CREDITS.txt", "README-AURORA.txt", "PEERPRESSURE-NOTICE.txt"]  # copied if in the Extra
+HID_INACTIVE = ["AuroraFixer.xex"]  # chain loader as shipped in the shareable Extra (not used there)
+HID_FILES = HID_REQUIRED + HID_DOCS + HID_INACTIVE  # everything uninstall may remove
 HID_LOGS = ["aurora-loader.log", "sideload-loader.log"]
 INI_MARKER = b"hiddriver360"  # our dashboard INIs say so in their first line
 
@@ -262,25 +266,38 @@ def sha(data):
 
 
 def find_extra(path):
+    repo_dist = os.path.join(os.path.dirname(HERE), "dist")
     cands = [path] if path else [os.path.join(HERE, "HidDriver360"),                   # beside it
                                  os.path.join(HERE, "SoftmodExtras", "HidDriver360"),  # release zip
-                                 os.path.join(os.path.dirname(HERE), "dist", "SoftmodExtras", "HidDriver360")]  # repo
+                                 os.path.join(repo_dist, "release", "SoftmodExtras", "HidDriver360"),
+                                 os.path.join(repo_dist, "personal", "SoftmodExtras", "HidDriver360")]
     for cand in cands:
-        if cand and os.path.isfile(os.path.join(cand, "AuroraFixer.xex")):
+        if cand and os.path.isfile(os.path.join(cand, "HidDriver", "HidLoader.xex")):
             return cand
     raise InstallError("HidDriver360 Extra folder not found - build it with tools/make-extra.py "
                        "or pass --extra <folder>")
 
 
 class Payload:
-    """The assembled Extra: the files that end up in Hdd1:\\PeerPressure\\SideLoading."""
+    """The assembled Extra: the files that end up in Hdd1:\\PeerPressure\\SideLoading.
+
+    Works with both the shareable Extra (no PeerPressure files; chain loader parked in HidDriver\\)
+    and a personal one (chain loader at the top + the user's own AuroraFixer.orig.xex)."""
     def __init__(self, folder):
         def rd(*p):
-            with open(os.path.join(folder, *p), "rb") as f:
+            path = os.path.join(folder, *p)
+            if not os.path.isfile(path):
+                return None
+            with open(path, "rb") as f:
                 return f.read()
-        self.loader = rd("AuroraFixer.xex")
-        self.bundled_orig = rd("AuroraFixer.orig.xex")
-        self.hid = {n: rd("HidDriver", n) for n in HID_FILES}
+        self.loader = rd("AuroraFixer.xex") or rd("HidDriver", "AuroraFixer.xex")
+        if self.loader is None:
+            raise InstallError("no AuroraFixer.xex chain loader in %s" % folder)
+        self.bundled_orig = rd("AuroraFixer.orig.xex")  # only in a personal Extra
+        self.hid = {n: rd("HidDriver", n) for n in HID_REQUIRED}
+        if None in self.hid.values():
+            raise InstallError("%s\\HidDriver is missing %s" % (folder, " / ".join(HID_REQUIRED)))
+        self.hid.update({n: rd("HidDriver", n) for n in HID_DOCS if rd("HidDriver", n) is not None})
         self.inis = {n: rd(n) for n in sorted(os.listdir(folder)) if n.lower().endswith(".ini")}
 
 
@@ -365,6 +382,13 @@ def install(con, backup, payload):
     if kind == "unknown":
         raise InstallError("AuroraFixer.xex is neither PeerPressure's fixer nor this project's loader "
                            "(sha %s) - not touching it." % sha(fixer))
+    # PeerPressure's fixer always comes from the console (or a personal Extra) - never shipped.
+    have_orig = orig is not None or payload.bundled_orig is not None
+    if kind == "ours" and not have_orig:
+        raise InstallError("AuroraFixer.xex is this project's loader but AuroraFixer.orig.xex is "
+                           "missing. Copy AuroraFixer.xex from your PeerPressure download to "
+                           "Hdd1:\\PeerPressure\\SideLoading\\AuroraFixer.orig.xex, then re-run.")
+    skip_aurora = kind == "missing" and not have_orig
     kp = con.read(KPATCH)
     if kp is not None:
         parse_patches(kp)  # refuse early on a malformed file
@@ -391,18 +415,22 @@ def install(con, backup, payload):
             con.write(path, want, n, previous=have)
 
     print("3. Aurora (AuroraFixer chain loader)")
-    if kind == "peerpressure":
-        if orig is not None and orig != fixer:
-            backup.save(FIXER_ORIG, orig)
-        backup.save(FIXER, fixer)
-        con.write(FIXER_ORIG, fixer, "AuroraFixer.orig.xex", previous=orig)  # the console's own fixer
-    elif orig is None:
-        print("   no PeerPressure AuroraFixer on the console - using the one bundled with the Extra")
-        con.write(FIXER_ORIG, payload.bundled_orig, "AuroraFixer.orig.xex")
-    if fixer == payload.loader:
-        print("   loader up to date")
+    if skip_aurora:
+        print("   no PeerPressure AuroraFixer.xex on the console - Aurora support skipped "
+              "(other dashboards are set up)")
     else:
-        con.write(FIXER, payload.loader, "AuroraFixer.xex", previous=fixer)
+        if kind == "peerpressure":
+            if orig is not None and orig != fixer:
+                backup.save(FIXER_ORIG, orig)
+            backup.save(FIXER, fixer)
+            con.write(FIXER_ORIG, fixer, "AuroraFixer.orig.xex", previous=orig)  # the console's own fixer
+        elif orig is None:
+            print("   using the AuroraFixer.orig.xex from your personal Extra")
+            con.write(FIXER_ORIG, payload.bundled_orig, "AuroraFixer.orig.xex")
+        if fixer == payload.loader:
+            print("   loader up to date")
+        else:
+            con.write(FIXER, payload.loader, "AuroraFixer.xex", previous=fixer)
 
     print("4. cleanup of the older install")
     remove_legacy(con, backup)

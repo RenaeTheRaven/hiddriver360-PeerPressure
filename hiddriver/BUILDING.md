@@ -1,6 +1,7 @@
 # Building hiddriver.xex
 
-`prebuilt/hiddriver.xex` is hiddriver360 at upstream commit
+`prebuilt/hiddriver.xex` is [hiddriver360](https://github.com/EinTim23/hiddriver360) by
+EinTim23 (GPL-3.0) at upstream commit
 [`6159866`](https://github.com/EinTim23/hiddriver360/commit/6159866) (v0.6-beta master) with
 [`0001-Keep-USB-transfer-state-out-of-the-loader-s-process-.patch`](0001-Keep-USB-transfer-state-out-of-the-loader-s-process-.patch)
 applied. Building it needs an Xbox 360 XDK, which can't be distributed (so it can't be built in CI).
