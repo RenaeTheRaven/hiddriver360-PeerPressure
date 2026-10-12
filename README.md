@@ -58,7 +58,7 @@ the [PeerPressure](https://github.com/grimdoomer/Xbox360PeerPressure) softmod â€
 It packages [hiddriver360](https://github.com/EinTim23/hiddriver360) (v0.6-beta) with:
 
 - **a fix** that makes hiddriver survive the dashboard â†’ game switch when it isn't loaded by
-  DashLaunch (see [Why a patched hiddriver](#why-a-patched-hiddriver)), and
+  DashLaunch, and
 - **a small loader** that lets PeerPressure load it at boot, for Aurora or any other dashboard,
   **without modifying any PeerPressure file**.
 
