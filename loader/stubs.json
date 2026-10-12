@@ -1,0 +1,23 @@
+{
+  "libraries": [
+    {
+      "module": "xboxkrnl.exe",
+      "records": [
+        "__imp_XexLoadImage",
+        "XexLoadImage",
+        "__imp_XexGetModuleHandle",
+        "XexGetModuleHandle",
+        "__imp_ObCreateSymbolicLink",
+        "ObCreateSymbolicLink",
+        "__imp_NtCreateFile",
+        "NtCreateFile",
+        "__imp_NtWriteFile",
+        "NtWriteFile",
+        "__imp_NtClose",
+        "NtClose",
+        "__imp_HalSendSMCMessage",
+        "HalSendSMCMessage"
+      ]
+    }
+  ]
+}

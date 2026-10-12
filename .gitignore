@@ -1,0 +1,7 @@
+dist/
+build/
+backups/
+__pycache__/
+*.o
+*.elf
+loader/*.xex

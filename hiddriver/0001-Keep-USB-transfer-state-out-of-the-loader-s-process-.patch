@@ -1,0 +1,189 @@
+From 3da7ba0bfafb8b135c76e3085f3da1a38578413c Mon Sep 17 00:00:00 2001
+From: Renae the Raven <renaetheraven@gmail.com>
+Date: Mon, 12 Oct 2026 11:27:29 -0400
+Subject: [PATCH] Keep USB transfer state out of the loader's process heap
+
+hiddriver allocated its HidControllerExtension (which embeds the queued USB
+interrupt TRB) and the interrupt transfer buffer from the CRT heap, i.e. the
+heap of whichever process loaded the DLL. Under DashLaunch that is the system
+process, but when hiddriver is loaded from a dashboard/title context (e.g. a
+PeerPressure + Aurora chain loader) it is the dashboard's title heap, which is
+reclaimed on a game launch while the USB stack still has the transfer queued.
+Result: hard hang when launching any game with a HID controller attached, and
+when hot-plugging one mid-game.
+
+Route all allocations (operator new/delete, malloc/calloc/free) to a fixed
+192KB arena inside the module image (system DLL region), protected by a
+spinlock so it is usable from the DISPATCH-level HidAdd/HidRemove callbacks.
+Kernel pool is not an option: it is also per-process-type and cannot be used
+at DISPATCH here.
+
+Also:
+- XamInputSetState: don't forward set-state for our virtual controllers to XAM
+  (they advertise no motors; games send these on start and on connect).
+- XamInputGetCapabilitiesEx hook: add the missing return on the non
+  DEVICE_NOT_CONNECTED path (previously fell off the end of the function).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ hiddriver/arena_alloc.h  | 22 ++++++++++
+ hiddriver/hid_parser.cpp |  1 +
+ hiddriver/main.cpp       | 87 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 110 insertions(+)
+ create mode 100644 hiddriver/arena_alloc.h
+
+diff --git a/hiddriver/arena_alloc.h b/hiddriver/arena_alloc.h
+new file mode 100644
+index 0000000..8dc27c1
+--- /dev/null
++++ b/hiddriver/arena_alloc.h
+@@ -0,0 +1,22 @@
++#pragma once
++// Route hiddriver's heap allocations to a fixed arena inside our own image (see main.cpp)
++// instead of the CRT heap.
++//
++// The CRT heap (and kernel pool) belong to whichever process loaded us. Under DashLaunch that
++// is the system process; under other loaders (e.g. a PeerPressure/Aurora chain loader) it is
++// the dashboard's TITLE process, whose memory is reclaimed when a game launches. The USB
++// interrupt TRB (inside HidControllerExtension) and its transfer buffer (reportData) stay
++// queued with the USB stack across that switch, so they must live in system-owned memory.
++#include <stddef.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++void* hd_malloc(size_t n);
++void* hd_calloc(size_t count, size_t n);
++void hd_free(void* p);
++#ifdef __cplusplus
++}
++#endif
++#define malloc(n) hd_malloc(n)
++#define calloc(c, n) hd_calloc(c, n)
++#define free(p) hd_free(p)
+diff --git a/hiddriver/hid_parser.cpp b/hiddriver/hid_parser.cpp
+index 947ee9b..8b6e95e 100644
+--- a/hiddriver/hid_parser.cpp
++++ b/hiddriver/hid_parser.cpp
+@@ -29,6 +29,7 @@
+ #define DYNAMIC
+ #ifdef DYNAMIC
+ #include <malloc.h>
++#include "arena_alloc.h"
+ #define ACQUIRE_AND_RELEASE(structure, size) \
+ structure##_t* acquire_##structure() { return (structure##_t*)malloc(sizeof(structure##_t)); } \
+ void release_##structure(structure##_t* pointer) { free(pointer); }
+diff --git a/hiddriver/main.cpp b/hiddriver/main.cpp
+index 769b019..890fd56 100644
+--- a/hiddriver/main.cpp
++++ b/hiddriver/main.cpp
+@@ -11,6 +11,81 @@
+ #include "hid_parser.h"  
+ #include "usb.h"
+ #include "mapping.h"
++#include <string.h>
++
++// Heap for everything hiddriver allocates: a fixed arena inside our own image.
++// The CRT heap AND kernel pool both belong to the calling process, which under the
++// PeerPressure chain loader is Aurora's title (seen: crt 0x401xxxxx, pool 0x300xxxxx); that
++// memory is reclaimed on a game launch while USB transfers into it are still queued (the
++// console hard-hangs at the title switch, or when a controller is hot-plugged in-game). Our
++// image sits in the system-DLL region (0x81F00000), so this arena survives title switches,
++// and a spinlock makes it usable at DISPATCH (HidAddDevice/HidRemoveDevice callbacks).
++#define HD_ARENA_SIZE (192 * 1024)
++struct HdBlock { size_t size; HdBlock* next; size_t pad[2]; };  // 16-byte header; size includes it
++__declspec(align(16)) static unsigned char g_arena[HD_ARENA_SIZE];
++static HdBlock* g_arenaFree = nullptr;
++static DWORD g_arenaLock = 0;
++static bool g_arenaReady = false;
++
++extern "C" void* hd_malloc(size_t n) {
++	size_t need = (n + sizeof(HdBlock) + 15) & ~(size_t)15;
++	void* r = nullptr;
++	BYTE irql = KfAcquireSpinLock(&g_arenaLock);
++	if (!g_arenaReady) {
++		g_arenaFree = (HdBlock*)g_arena;
++		g_arenaFree->size = HD_ARENA_SIZE;
++		g_arenaFree->next = nullptr;
++		g_arenaReady = true;
++	}
++	for (HdBlock** pp = &g_arenaFree; *pp; pp = &(*pp)->next) {
++		HdBlock* b = *pp;
++		if (b->size < need) continue;
++		if (b->size - need >= 64) {  // split
++			HdBlock* rest = (HdBlock*)((unsigned char*)b + need);
++			rest->size = b->size - need;
++			rest->next = b->next;
++			*pp = rest;
++			b->size = need;
++		} else {
++			*pp = b->next;
++		}
++		r = (unsigned char*)b + sizeof(HdBlock);
++		break;
++	}
++	KfReleaseSpinLock(&g_arenaLock, irql);
++	if (!r) DbgPrint("EINTIM: ARENA OUT OF MEMORY (%d bytes)\n", (int)n);
++	return r;
++}
++extern "C" void* hd_calloc(size_t count, size_t n) {
++	size_t total = count * n;
++	void* p = hd_malloc(total);
++	if (p) memset(p, 0, total);
++	return p;
++}
++extern "C" void hd_free(void* p) {
++	if (!p) return;
++	HdBlock* b = (HdBlock*)((unsigned char*)p - sizeof(HdBlock));
++	BYTE irql = KfAcquireSpinLock(&g_arenaLock);
++	HdBlock* prev = nullptr;
++	HdBlock* cur = g_arenaFree;
++	while (cur && cur < b) { prev = cur; cur = cur->next; }  // free list is address-ordered
++	b->next = cur;
++	if (prev) prev->next = b; else g_arenaFree = b;
++	if (cur && (unsigned char*)b + b->size == (unsigned char*)cur) {  // merge with next
++		b->size += cur->size;
++		b->next = cur->next;
++	}
++	if (prev && (unsigned char*)prev + prev->size == (unsigned char*)b) {  // merge with previous
++		prev->size += b->size;
++		prev->next = b->next;
++	}
++	KfReleaseSpinLock(&g_arenaLock, irql);
++}
++void* __cdecl operator new(size_t n) { return hd_malloc(n); }
++void* __cdecl operator new[](size_t n) { return hd_malloc(n); }
++void __cdecl operator delete(void* p) { hd_free(p); }
++void __cdecl operator delete[](void* p) { hd_free(p); }
++#include "arena_alloc.h"
+ 
+ Detour HidAddDeviceDetour;
+ Detour HidRemoveDeviceDetour;
+@@ -1305,6 +1380,16 @@ int HidAddDeviceHook(deviceHandle* deviceHandle) {
+ }
+ 
+ DWORD XamInputSetStateHook(DWORD user, DWORD flags, XINPUT_STATE* pInputState, BYTE bAmplitude, BYTE bFrequency, BYTE bOffset) {
++	// Our virtual controllers report no vibration motors; don't hand their set-state calls to
++	// XAM (games send these at startup and on every controller connect).
++	{
++		DWORD u = ((user & 0xFF) == 0xFF) ? 0 : user;
++		for (int i = 0; i < (sizeof(connectedControllers) / sizeof(Controller)); i++) {
++			if (connectedControllers[i].controllerDriver && connectedControllers[i].userIndex == u)
++				return ERROR_SUCCESS;
++		}
++	}
++
+ 	DWORD status = XamInputSetStateDetour.GetOriginal<decltype(&XamInputSetStateHook)>()(user, flags, pInputState, bAmplitude, bFrequency, bOffset);
+ 
+ 	if ((user & 0xFF) == 0xFF)
+@@ -1360,6 +1445,8 @@ DWORD XamInputGetCapabilitiesExHook(DWORD unk, DWORD user, DWORD flags, XINPUT_C
+ 		capabilities->Vibration.wRightMotorSpeed = 0;
+ 		return ERROR_SUCCESS;
+ 	}
++
++	return status;
+ }
+ 
+ NTSTATUS XInputdReadStateHook(DWORD dwDeviceContext, PDWORD pdwPacketNumber, PXINPUT_GAMEPAD pInputData, PBOOL unk) {
+-- 
+2.56.0
+
