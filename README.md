@@ -14,6 +14,7 @@ I may not be a strictly software development oriented tech, but I know a thing o
 
 The old version needed to be used with DashLauncher as a plugin because of how it used system calls.
 Some of how PeerPressure patches the kernel was RE'd, in conjunction with a chain-load to Aurora. 
+I also helped the model fix an issue with the driver that would allow a 3rd party controller to work in Aurora, but cause the IO stack to panic when you tried to launch a game.Did
 This took a combination of a questionably sourced SDK, and some really oddball testing.
 
 The result? A 4KB patch to the kernel, and a custom .xex that loads with Aurora and lets you use anything from a DDR dance mat for the Gamecube to a DS5.
