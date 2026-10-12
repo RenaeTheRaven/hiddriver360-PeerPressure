@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      peerpressure_url:
+        description: "PeerPressure SoftmodInstaller.zip URL to build the Extra against (optional)"
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang lld cmake
+
+      - name: Build XexTool
+        run: tools/build-xextool.sh
+
+      - name: Installer tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Build loaders (and check they reproduce loader/SHA256SUMS)
+        run: |
+          XEXTOOL=build/xextool/XexTool ./build.sh
+          cd loader && sha256sum -c SHA256SUMS
+
+      - name: Assemble the Extra
+        if: ${{ inputs.peerpressure_url != '' }}
+        run: |
+          curl -fsSL -o SoftmodInstaller.zip "${{ inputs.peerpressure_url }}"
+          python3 tools/make-extra.py --peerpressure SoftmodInstaller.zip
+          cp tools/install.py dist/SoftmodExtras/
+          cp README.md LICENSE dist/SoftmodExtras/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hiddriver360-peerpressure
+          path: |
+            loader/*.xex
+            dist/SoftmodExtras/
+          if-no-files-found: warn
