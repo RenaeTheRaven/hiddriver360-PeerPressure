@@ -1,4 +1,28 @@
-# hiddriver360 for PeerPressure
+# hiddriver360-PeerPressure
+Rework of the hiddriver360 plugin to work on PressurePoint modded Xbox 360s
+
+
+This is an AI-driven rework of the plugin that let's you use any controller on an Xbox 360.
+
+
+Let me be clear- this may be AI-made, but I'm not an idiot. I'm a Unix system administrator of 12 years.
+
+
+I may not be a strictly software development oriented tech, but I know a thing or two, so there was plenty of hand-holding.
+
+
+
+The old version needed to be used with DashLauncher as a plugin because of how it used system calls.
+Some of how PeerPressure patches the kernel was RE'd, in conjunction with a chain-load to Aurora. 
+I also helped the model fix an issue with the driver that would allow a 3rd party controller to work in Aurora, but cause the IO stack to panic when you tried to launch a game.Did
+This took a combination of a questionably sourced SDK, and some really oddball testing.
+
+The result? A 4KB patch to the kernel, and a custom .xex that loads with Aurora and lets you use anything from a DDR dance mat for the Gamecube to a DS5.
+
+
+This was really fun to get working. 
+
+---
 
 Use **DualShock 3/4, DualSense, Switch Pro and other USB HID controllers** on an Xbox 360 running
 the [PeerPressure](https://github.com/grimdoomer/Xbox360PeerPressure) softmod — in the dashboard
